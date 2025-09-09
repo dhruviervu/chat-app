@@ -198,10 +198,12 @@ async function attemptWebSocket(url, timeoutMs = 4000) {{
 async function connectWithFallback(maxAttempts = 15) {{
   let base = (wsBaseUrl || "").trim();
   if (!base) {{
-    const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    // If hosted (Railway / custom domain), use same host and protocol with /ws
+    const isHttps = location.protocol === 'https:';
+    const proto = isHttps ? 'wss://' : 'ws://';
     const host = location.hostname;
-    const port = '8765';
-    base = proto + host + ':' + port;
+    // If client is hosted elsewhere, Railway server should be provided via WS_SERVER_URL
+    base = proto + host + (location.port ? ':' + location.port : '');
   }}
   base = base.replace(/\/$/, "");
   const url = base + "/ws/" + encodeURIComponent(username);
