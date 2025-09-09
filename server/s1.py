@@ -31,9 +31,12 @@ DEFAULT_PASSPHRASE = os.getenv("DEFAULT_PASSPHRASE", "xQ9#kL2$pR7&mZ4!vW1@cN6^bV
 
 MAX_USERS = int(os.getenv("MAX_USERS", "10"))
 
-SERVER_HOST = os.getenv("SERVER_HOST", "127.0.0.1")
-SERVER_PORT = int(os.getenv("SERVER_PORT", "8765"))
+SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
+# Railway exposes the app on PORT; allow SERVER_PORT but fall back to PORT
+SERVER_PORT = int(os.getenv("SERVER_PORT") or os.getenv("PORT", "8765"))
 RELOAD = os.getenv("RELOAD", "false").lower() in ("1", "true", "yes", "on")
+PROXY_HEADERS = os.getenv("PROXY_HEADERS", "true").lower() in ("1", "true", "yes", "on")
+FORWARDED_ALLOW_IPS = os.getenv("FORWARDED_ALLOW_IPS", "*")
 USE_REDIS = os.getenv("USE_REDIS", "false").lower() in ("1", "true", "yes", "on")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
@@ -327,4 +330,11 @@ async def root():
 
 if __name__ == "__main__":
     print(f"[server] starting WITHOUT TLS on {SERVER_HOST}:{SERVER_PORT}")
-    uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, reload=RELOAD)
+    uvicorn.run(
+        app,
+        host=SERVER_HOST,
+        port=SERVER_PORT,
+        reload=RELOAD,
+        proxy_headers=PROXY_HEADERS,
+        forwarded_allow_ips=FORWARDED_ALLOW_IPS,
+    )
