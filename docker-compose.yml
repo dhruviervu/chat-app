@@ -1,0 +1,43 @@
+version: "3.9"
+services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    environment:
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: "${SERVER_PORT:-8765}"
+      DEFAULT_PASSPHRASE: "supersecret123"
+      MAX_USERS: "${MAX_USERS:-50}"
+      CORS_ALLOW_ORIGINS: "${CORS_ALLOW_ORIGINS:-*}"
+      USE_REDIS: "${USE_REDIS:-true}"
+      REDIS_URL: "redis://redis:6379/0"
+    ports:
+      - "${SERVER_PORT:-8765}:8765"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 3s
+      timeout: 2s
+      retries: 15
+    restart: unless-stopped
+    depends_on:
+      - redis
+
+  client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    environment:
+      WS_SERVER_URL: "ws://localhost:${SERVER_PORT:-8765}"
+    ports:
+      - "${CLIENT_PORT:-8501}:8501"
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    restart: unless-stopped

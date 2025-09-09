@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+const username = "Alice";
+const ws = new WebSocket("ws://127.0.0.1:8765/ws/" + username);
+
+ws.onopen = () => console.log("[ws open]");
+ws.onmessage = (evt) => console.log("[ws msg]", evt.data);
+ws.onclose = () => console.log("[ws closed]");
+ws.onerror = (err) => console.log("[ws error]", err);
+
+setTimeout(() => ws.send("Hello from Alice"), 1000);
+</script>
+</body>
+</html>

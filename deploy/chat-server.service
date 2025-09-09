@@ -1,0 +1,20 @@
+[Unit]
+Description=Chat App FastAPI Server
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/chat-app/server
+Environment=SERVER_HOST=0.0.0.0
+Environment=SERVER_PORT=8765
+Environment=DEFAULT_PASSPHRASE=change_me
+Environment=USE_REDIS=true
+Environment=REDIS_URL=redis://localhost:6379/0
+ExecStart=/usr/bin/python3 /opt/chat-app/server/s1.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

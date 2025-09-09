@@ -1,0 +1,60 @@
+version: "3.9"
+services:
+  traefik:
+    image: traefik:v3.1
+    command:
+      - "--providers.docker=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.le.acme.tlschallenge=true"
+      - "--certificatesresolvers.le.acme.email=${LETSENCRYPT_EMAIL}"
+      - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
+    restart: unless-stopped
+
+  server:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    environment:
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8765
+      - DEFAULT_PASSPHRASE=${DEFAULT_PASSPHRASE}
+      - MAX_USERS=${MAX_USERS:-50}
+      - USE_REDIS=${USE_REDIS:-true}
+      - REDIS_URL=redis://redis:6379/0
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.chat-ws.rule=Host(`${CHAT_DOMAIN}`) && PathPrefix(`/ws`)"
+      - "traefik.http.routers.chat-ws.entrypoints=websecure"
+      - "traefik.http.routers.chat-ws.tls.certresolver=le"
+      - "traefik.http.services.chat-ws.loadbalancer.server.port=8765"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  client:
+    build:
+      context: ..
+      dockerfile: client/Dockerfile
+    environment:
+      - WS_SERVER_URL=wss://${CHAT_DOMAIN}/ws
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.chat-ui.rule=Host(`${CHAT_DOMAIN}`)"
+      - "traefik.http.routers.chat-ui.entrypoints=websecure"
+      - "traefik.http.routers.chat-ui.tls.certresolver=le"
+      - "traefik.http.services.chat-ui.loadbalancer.server.port=8501"
+    depends_on:
+      - server
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
