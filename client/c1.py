@@ -9,7 +9,8 @@ st.title("Secure Chat — Multiuser (AES-GCM with Default Passphrase)")
 
 col1, col2, col3 = st.columns([2, 1, 2])
 with col1:
-    username = st.text_input("Username", value="Alice")
+    default_username = os.getenv("DEFAULT_USERNAME", f"user-{secrets.token_hex(3)}")
+    username = st.text_input("Username", value=default_username)
 with col2:
     anonymous = st.checkbox("Anonymous label", value=False)
 with col3:
