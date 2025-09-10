@@ -32,7 +32,7 @@ DEFAULT_PASSPHRASE = os.getenv("DEFAULT_PASSPHRASE", "xQ9#kL2$pR7&mZ4!vW1@cN6^bV
 MAX_USERS = int(os.getenv("MAX_USERS", "10"))
 
 SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
-# Railway exposes the app on PORT; allow SERVER_PORT but fall back to PORT
+# Render exposes the app on PORT; allow SERVER_PORT but fall back to PORT
 SERVER_PORT = int(os.getenv("SERVER_PORT") or os.getenv("PORT", "8765"))
 RELOAD = os.getenv("RELOAD", "false").lower() in ("1", "true", "yes", "on")
 PROXY_HEADERS = os.getenv("PROXY_HEADERS", "true").lower() in ("1", "true", "yes", "on")
