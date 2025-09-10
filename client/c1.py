@@ -13,7 +13,8 @@ with col1:
 with col2:
     anonymous = st.checkbox("Anonymous label", value=False)
 with col3:
-    ws_base_url = st.text_input("Server WebSocket base URL", value=os.getenv("WS_SERVER_URL", "ws://127.0.0.1:8765"))
+    default_ws_url = os.getenv("WS_SERVER_URL", "wss://chat-app-4b0u.onrender.com")
+    ws_base_url = st.text_input("Server WebSocket base URL", value=default_ws_url)
 
 if anonymous:
     anon_label = st.text_input("Anonymous label (optional)", value=f"Anon-{secrets.token_hex(3)}")
@@ -198,12 +199,8 @@ async function attemptWebSocket(url, timeoutMs = 4000) {{
 async function connectWithFallback(maxAttempts = 15) {{
   let base = (wsBaseUrl || "").trim();
   if (!base) {{
-    // If hosted (Railway / custom domain), use same host and protocol with /ws
-    const isHttps = location.protocol === 'https:';
-    const proto = isHttps ? 'wss://' : 'ws://';
-    const host = location.hostname;
-    // If client is hosted elsewhere, Railway server should be provided via WS_SERVER_URL
-    base = proto + host + (location.port ? ':' + location.port : '');
+    // Default to Render deployment if no WS_SERVER_URL provided
+    base = "wss://chat-app-4b0u.onrender.com";
   }}
   base = base.replace(/\/$/, "");
   const url = base + "/ws/" + encodeURIComponent(username);
