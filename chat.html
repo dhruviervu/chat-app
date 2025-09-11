@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anonymous Chat — Encrypted Messaging</title>
+  <style>
+    :root {
+      --bg: #10b981; /* green */
+      --panel: #f6f6f8;
+      --text: #111827;
+      --muted: #6b7280;
+      --bubble-sent: #dcf8c6;
+      --bubble-recv: #ffffff;
+      --bubble-sent-text: #111827;
+      --bubble-recv-text: #111827;
+      --accent: #3b82f6;
+    }
+    body { background: var(--bg); color: var(--text); font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin:0; }
+    .container { display:flex; gap:16px; padding:12px; height:100vh; box-sizing:border-box; }
+    .left { flex:1; display:flex; flex-direction:column; }
+    .right { width:300px; border-left:1px solid rgba(100,100,100,0.08); padding-left:12px; box-sizing:border-box; }
+    .header { font-weight:600; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; }
+    .chatbox { flex:1; background:var(--panel); padding:12px; border-radius:8px; overflow:auto; display:flex; flex-direction:column; gap:8px; }
+    .input-row { display:flex; gap:8px; margin-top:8px; align-items:center; }
+    .text-input { flex:1; padding:10px 12px; border-radius:8px; border:1px solid rgba(0,0,0,0.08); background:transparent; color:#000; }
+    .send-btn { padding:10px 14px; border-radius:8px; border:none; background:var(--accent); color:white; cursor:pointer; }
+    .user-item { padding:8px 12px; cursor:pointer; border-radius:9999px; margin-bottom:6px; background:#ef4444; color:#fff; }
+    .user-item:hover { background:#dc2626; }
+    .chat-bubble { max-width:75%; padding:10px 12px; border-radius:16px; box-shadow: 0 1px 0 rgba(0,0,0,0.03); display:inline-block; word-break:break-word; }
+    .bubble-row { display:flex; gap:8px; align-items:flex-end; }
+    .bubble-left { justify-content:flex-start; }
+    .bubble-right { justify-content:flex-end; align-self:flex-end; }
+    .meta { font-size:11px; color:var(--muted); margin-top:4px; }
+    .ts { font-size:11px; color:var(--muted); margin-left:6px; }
+    .live-title { display:inline-block; padding:6px 12px; border-radius:9999px; color:#fff; background:linear-gradient(90deg, #dc2626, #ef4444, #f87171); margin:0; }
+    #active-chats button { background:#ef4444; color:#fff; border:none; border-radius:9999px; padding:8px 12px; cursor:pointer; width:100%; margin-bottom:6px; }
+    #active-chats button:hover { filter:brightness(0.95); }
+    .settings { display:flex; gap:8px; align-items:center; font-size:13px; color:#fff; margin-bottom:8px; }
+    .settings input[type="text"] { padding:6px 8px; border-radius:8px; border:1px solid rgba(0,0,0,0.1); }
+    .settings label { display:flex; align-items:center; gap:6px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="right">
+      <h4 class="live-title">Live users</h4>
+      <div id="userlist" style="font-family:monospace; white-space:pre-wrap; max-height:300px; overflow-y:auto;"></div>
+      <div style="margin-top:12px;">
+        <div><strong>Active chats:</strong></div>
+        <div id="active-chats" style="margin-top:8px; max-height:200px; overflow-y:auto;"></div>
+      </div>
+    </div>
+    <div class="left">
+      <div class="header">
+        <div>Chat with: <span id="current-peer">Select a user</span></div>
+        <div class="settings">
+          <input id="name" placeholder="Your display name" />
+          <label><input type="checkbox" id="dark" /> Dark</label>
+        </div>
+      </div>
+      <div id="chatbox" class="chatbox"></div>
+      <div class="input-row">
+        <input id="out" class="text-input" placeholder="Type a message and press Enter" />
+        <button id="send" class="send-btn">Send</button>
+      </div>
+      <div id="status" style="color:var(--muted); margin-top:8px;"></div>
+    </div>
+  </div>
+
+  <script>
+    // Config: ws via ?ws=... takes priority, else window.WS_SERVER_URL, else default
+    const params = new URLSearchParams(location.search);
+    const wsBaseUrl = (params.get('ws') || (window.WS_SERVER_URL || 'wss://chat-app-4b0u.onrender.com')).replace(/\/$/, '');
+
+    // Persistent identity
+    let wsUsername = localStorage.getItem('ws_username');
+    if (!wsUsername) { wsUsername = 'user-' + Math.random().toString(16).slice(2, 10); localStorage.setItem('ws_username', wsUsername); }
+    const username = wsUsername;
+
+    // UI preferences
+    const nameInput = document.getElementById('name');
+    const darkToggle = document.getElementById('dark');
+    nameInput.value = localStorage.getItem('display_label') || '';
+    darkToggle.checked = localStorage.getItem('dark_mode') === '1';
+    document.documentElement.style.setProperty('--bg', darkToggle.checked ? '#064e3b' : '#10b981');
+
+    nameInput.addEventListener('input', () => {
+      localStorage.setItem('display_label', nameInput.value.trim());
+      // Optionally notify server by re-sending register
+      try { ws && ws.send(JSON.stringify({ type: 'register', username, anonymous: false, label: nameInput.value.trim() || username })); } catch(_) {}
+    });
+    darkToggle.addEventListener('change', () => {
+      localStorage.setItem('dark_mode', darkToggle.checked ? '1' : '0');
+      document.documentElement.style.setProperty('--bg', darkToggle.checked ? '#064e3b' : '#10b981');
+    });
+
+    let ws = null;
+    let chatHistories = JSON.parse(localStorage.getItem('chat_histories') || '{}');
+    let currentPeer = localStorage.getItem('current_peer');
+    let latestUsers = {};
+    let defaultPassphrase = null;
+
+    function saveState() {
+      try {
+        localStorage.setItem('chat_histories', JSON.stringify(chatHistories));
+        if (currentPeer) localStorage.setItem('current_peer', currentPeer);
+      } catch(_) {}
+    }
+
+    function fmtLocal(iso) {
+      if (!iso) return '';
+      try {
+        const d = new Date(iso);
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      } catch(e) { return iso; }
+    }
+
+    function setStatus(s) { document.getElementById('status').textContent = s; }
+    function clearChatbox() { document.getElementById('chatbox').innerHTML = ''; }
+
+    function appendBubble({from_label, sender_username, text, ts, mine=false}) {
+      const cb = document.getElementById('chatbox');
+      const row = document.createElement('div');
+      row.className = 'bubble-row ' + (mine ? 'bubble-right' : 'bubble-left');
+      const wrapper = document.createElement('div');
+      wrapper.style.display = 'flex';
+      wrapper.style.flexDirection = 'column';
+      wrapper.style.alignItems = mine ? 'flex-end' : 'flex-start';
+      const bubble = document.createElement('div');
+      bubble.className = 'chat-bubble';
+      bubble.style.background = mine ? 'var(--bubble-sent)' : 'var(--bubble-recv)';
+      bubble.style.color = mine ? 'var(--bubble-sent-text)' : 'var(--bubble-recv-text)';
+      bubble.innerText = text;
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.innerHTML = "<span class='ts'> " + (ts ? fmtLocal(ts) : '') + "</span>";
+      wrapper.appendChild(bubble);
+      wrapper.appendChild(meta);
+      row.appendChild(wrapper);
+      cb.appendChild(row);
+      cb.scrollTop = cb.scrollHeight;
+    }
+
+    function updateActiveChats() {
+      const activeChatsDiv = document.getElementById('active-chats');
+      activeChatsDiv.innerHTML = '';
+      for (const peer in chatHistories) {
+        const chatBtn = document.createElement('button');
+        chatBtn.textContent = latestUsers[peer] ? latestUsers[peer].label : peer;
+        chatBtn.onclick = () => switchToChat(peer);
+        activeChatsDiv.appendChild(chatBtn);
+      }
+      saveState();
+    }
+
+    function switchToChat(peer) {
+      currentPeer = peer;
+      document.getElementById('current-peer').textContent = latestUsers[peer] ? latestUsers[peer].label : peer;
+      clearChatbox();
+      if (!defaultPassphrase) { setStatus('[Waiting for encryption key from server...]'); try { ws && ws.send(JSON.stringify({ type: 'get_passphrase' })); } catch(_) {} ; return; }
+      if (chatHistories[peer]) { decryptAndDisplayChatHistory(peer); }
+      updateActiveChats();
+      saveState();
+    }
+
+    async function deriveKey(pass) {
+      const enc = new TextEncoder();
+      const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey']);
+      return crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt: enc.encode('static-salt-demo'), iterations: 200000, hash: 'SHA-256' },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt','decrypt']
+      );
+    }
+
+    async function decrypt(key, payload) {
+      try {
+        const dec = new TextDecoder();
+        const iv = Uint8Array.from(atob(payload.iv), c => c.charCodeAt(0));
+        const ct = Uint8Array.from(atob(payload.ct), c => c.charCodeAt(0));
+        const pt = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: iv, additionalData: new TextEncoder().encode(payload.aad || ''), tagLength:128 },
+          key,
+          ct
+        );
+        return dec.decode(pt);
+      } catch(e) { console.error('decrypt error', e); return '[decryption failed]'; }
+    }
+
+    async function encrypt(key, msg, aadJson) {
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const enc = new TextEncoder();
+      const ct = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv: iv, additionalData: enc.encode(aadJson), tagLength:128 },
+        key,
+        enc.encode(msg)
+      );
+      return { iv: btoa(String.fromCharCode(...iv)), ct: btoa(String.fromCharCode(...new Uint8Array(ct))), aad: aadJson };
+    }
+
+    async function decryptAndDisplayChatHistory(peer) {
+      clearChatbox();
+      if (!defaultPassphrase) { setStatus('[Waiting for encryption key from server...]'); return; }
+      const key = await deriveKey(defaultPassphrase);
+      const msgs = chatHistories[peer] || [];
+      for (const msg of msgs) {
+        const decrypted = await decrypt(key, msg);
+        const mine = (msg.sender_username === username);
+        appendBubble({ from_label: msg.sender, sender_username: msg.sender_username, text: decrypted, ts: msg.timestamp, mine });
+      }
+    }
+
+    function attemptWebSocket(url, timeoutMs = 4000) {
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const sock = new WebSocket(url);
+        const timer = setTimeout(() => { if (!settled) { settled = true; try { sock.close(); } catch(_){}; reject(new Error('timeout')); } }, timeoutMs);
+        sock.onopen = () => { if (settled) return; settled = true; clearTimeout(timer); setStatus('[connected]'); resolve(sock); };
+        sock.onerror = e => { if (settled) return; settled = true; clearTimeout(timer); reject(e); };
+        sock.onclose = e => { if (!settled) { settled = true; clearTimeout(timer); reject(new Error('closed')); } };
+      });
+    }
+
+    async function connectWithFallback(maxAttempts = 8) {
+      const url = wsBaseUrl + '/ws/' + encodeURIComponent(username);
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try { const sock = await attemptWebSocket(url); return sock; }
+        catch (_) { const delay = Math.min(500 * Math.pow(2, attempt - 1), 4000); setStatus(`Connecting... attempt ${attempt}/${maxAttempts}`); await new Promise(r => setTimeout(r, delay)); }
+      }
+      setStatus('[ERROR] Connection attempt failed — is the server running?');
+      return null;
+    }
+
+    (async () => {
+      ws = await connectWithFallback();
+      if (!ws) return;
+
+      ws.onmessage = async evt => {
+        let obj; try { obj = JSON.parse(evt.data); } catch(_) { return; }
+        if (obj.type === 'passphrase') { defaultPassphrase = obj.passphrase; setStatus('[Received encryption key from server]'); if (currentPeer) { try { await decryptAndDisplayChatHistory(currentPeer); } catch(_){} } return; }
+        if (obj.type === 'register_ok') { setStatus('[REGISTERED as ' + obj.label + ']'); if (!defaultPassphrase && obj.passphrase) { defaultPassphrase = obj.passphrase; setStatus('[Received encryption key from server]'); } }
+        if (obj.type === 'user_list') {
+          latestUsers = {}; for (let u of obj.users) { latestUsers[u.username] = { label: u.label, anonymous: u.anonymous }; }
+          const listDiv = document.getElementById('userlist'); listDiv.innerHTML = '';
+          obj.users.forEach(u => {
+            if (u.username === username) return; // hide self
+            const span = document.createElement('div'); span.className = 'user-item'; span.innerText = u.label;
+            span.onclick = () => { if (u.username !== username) { if (!chatHistories[u.username]) chatHistories[u.username] = []; switchToChat(u.username); } };
+            listDiv.appendChild(span);
+          });
+          updateActiveChats(); if (currentPeer) { document.getElementById('current-peer').textContent = latestUsers[currentPeer] ? latestUsers[currentPeer].label : currentPeer; }
+          saveState();
+        }
+        if (!obj.type || obj.type === 'message') {
+          if (obj.recipient === username) {
+            if (!chatHistories[obj.sender_username]) chatHistories[obj.sender_username] = [];
+            chatHistories[obj.sender_username].push(obj);
+            if (currentPeer === obj.sender_username) {
+              if (!defaultPassphrase) { setStatus('[Waiting for encryption key...]'); return; }
+              const key = await deriveKey(defaultPassphrase);
+              const decrypted = await decrypt(key, obj);
+              appendBubble({ from_label: obj.sender, sender_username: obj.sender_username, text: decrypted, ts: obj.timestamp, mine:false });
+            }
+            updateActiveChats();
+          }
+        }
+        if (obj.type === 'chat_history') {
+          if (obj.chats) { for (const other in obj.chats) { chatHistories[other] = obj.chats[other]; } }
+          updateActiveChats(); saveState();
+        }
+      };
+
+      const reg = { type: 'register', username, anonymous: false, label: (nameInput.value.trim() || username) };
+      ws.onopen = () => { try { ws.send(JSON.stringify(reg)); } catch(_) {} ; try { ws.send(JSON.stringify({ type: 'get_passphrase' })); } catch(_) {} };
+
+      const _passphraseTicker = setInterval(() => { if (defaultPassphrase) { clearInterval(_passphraseTicker); return; } if (ws && ws.readyState === 1) { try { ws.send(JSON.stringify({ type: 'get_passphrase' })); } catch(_) {} } }, 1500);
+
+      document.getElementById('send').onclick = async () => {
+        if (!currentPeer) { setStatus('[select a user first]'); return; }
+        if (!defaultPassphrase) { setStatus('[Waiting for encryption key from server...]'); return; }
+        const out = document.getElementById('out').value; if (!out) return;
+        const key = await deriveKey(defaultPassphrase);
+        const aadJson = JSON.stringify({ sender: username, recipient: currentPeer });
+        const enc = await encrypt(key, out, aadJson);
+        const ts = new Date().toISOString();
+        const msg = { type: 'message', sender_username: username, recipient: currentPeer, sender: (nameInput.value.trim() || username), iv: enc.iv, ct: enc.ct, aad: aadJson, timestamp: ts };
+        try { ws.send(JSON.stringify(msg)); } catch(e) { setStatus('[send failed]'); }
+        if (!chatHistories[currentPeer]) chatHistories[currentPeer] = [];
+        chatHistories[currentPeer].push(msg);
+        appendBubble({ from_label: null, sender_username: username, text: out, ts: ts, mine:true });
+        document.getElementById('out').value = '';
+        updateActiveChats(); saveState();
+      };
+
+      document.getElementById('out').addEventListener('keypress', e => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('send').click(); } });
+    })();
+  </script>
+</body>
+</html>
+
+

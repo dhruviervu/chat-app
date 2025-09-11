@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spam Email Detector</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #f7f7fb; }
+    .nav { background: white; border-bottom: 1px solid #eee; padding: 14px 24px; font-weight: 600; }
+    .wrap { max-width: 820px; margin: 32px auto; padding: 0 16px; }
+    .card { background: white; border: 1px solid #eee; border-radius: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.04); padding: 24px; }
+    .muted { color: #666; font-size: 14px; }
+    .btn { display: inline-block; padding: 10px 16px; border: 0; border-radius: 10px; background: #1a73e8; color: white; font-weight: 600; cursor: pointer; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .result { margin-top: 16px; padding: 12px 16px; border-radius: 10px; font-weight: 700; }
+    .spam { background: #fde8e8; color: #b00020; border: 1px solid #f9c5c5; }
+    .ham { background: #e6f4ea; color: #0b7a2e; border: 1px solid #c8e6c9; }
+    .flash { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 10px 14px; border-radius: 10px; margin-bottom: 12px; }
+    .preview { white-space: pre-wrap; background: #fafafa; border: 1px dashed #ddd; padding: 12px; border-radius: 8px; max-height: 260px; overflow: auto; }
+    footer { margin: 36px 0; color: #888; font-size: 13px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="nav">📧 Spam Email Detector</div>
+  <div class="wrap">
+    <div class="card">
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}
+          {% for msg in messages %}
+            <div class="flash">{{ msg }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+      <h2>Upload a PDF email</h2>
+      <p class="muted">This app extracts text and predicts <strong>SPAM</strong> or <strong>Non‑SPAM</strong> using a trained ML model.</p>
+      <form method="post" enctype="multipart/form-data">
+        <input type="file" name="file" accept="application/pdf" required>
+        <button class="btn" type="submit">Classify</button>
+      </form>
+      {% if prediction is not none %}
+        <div class="result {% if prediction=='SPAM' %}spam{% else %}ham{% endif %}">
+          Result: {{ prediction }}
+        </div>
+        <p class="muted">File: {{ filename }}</p>
+        <details>
+          <summary class="muted">Show text preview</summary>
+          <div class="preview">{{ text_preview }}</div>
+        </details>
+      {% endif %}
+    </div>
+    <footer>Built with Flask + scikit‑learn</footer>
+  </div>
+</body>
+</html>
